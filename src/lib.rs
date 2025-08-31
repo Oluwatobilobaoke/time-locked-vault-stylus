@@ -50,7 +50,9 @@ sol! {
     event EmergencyWithdraw(address indexed user, uint256 amount, uint256 penalty);
     event RewardsClaimed(address indexed user, uint256 amount);
     event EmergencyModeActivated();
+    event Funded(address indexed sender, uint256 amount);
 
+    event VaultWithdrawn(uint256 amount);
     #[derive(Debug)]
     error InsufficientBalance(address sender, uint256 balance, uint256 needed);
 
@@ -136,6 +138,7 @@ impl TimeLockedVault {
     }
 
     // deposit eth into the vault for a specified lock period
+    #[payable]
     pub fn deposit(&mut self, lock_period: U256) -> Result<(), TimeLockedVaultError> {
         if self.emergency_mode.get() {
             return Err(TimeLockedVaultError::EmergencyModeActive(
@@ -381,6 +384,10 @@ impl TimeLockedVault {
         Ok(())
     }
 
+    pub fn get_emergency_mode(&self) -> bool {
+        self.emergency_mode.get()
+    }
+
     // View functions
     pub fn get_deposit_info(&self, user: Address) -> (U256, U256, U256, U256) {
         let deposit = self.deposits.getter(user);
@@ -396,6 +403,44 @@ impl TimeLockedVault {
 
     pub fn get_total_locked(&self) -> U256 {
         self.total_locked.get()
+    }
+
+    // fund the vault
+    #[payable]
+    pub fn fund_vault(&mut self) -> Result<(), TimeLockedVaultError> {
+        let amount = self.vm().msg_value();
+
+        if self.owner.get() != self.vm().msg_sender() {
+            return Err(TimeLockedVaultError::Unauthorized(Unauthorized {
+                sender: self.vm().msg_sender(),
+            }));
+        }
+
+        let _ = self.vm().transfer_eth(self.owner.get(), amount);
+
+        // emit the event
+        log(
+            self.vm(),
+            Funded {
+                amount,
+                sender: self.vm().msg_sender(),
+            },
+        );
+        Ok(())
+    }
+
+
+    // withdraw the vault funds to the owner
+    pub fn withdraw_vault(&mut self) -> Result<(), TimeLockedVaultError> {
+        let amount = self.total_locked.get();
+        let _ = self.vm().transfer_eth(self.owner.get(), amount);
+
+        // emit the event
+        log(
+            self.vm(),
+            VaultWithdrawn { amount },
+        );
+        Ok(())
     }
 }
 
